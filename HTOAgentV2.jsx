@@ -1,0 +1,237 @@
+import { useState, useRef, useEffect } from "react";
+
+const MARKET = {
+  btc: 64052, btcChange: -3.97, rsi: 38.10, ema200: 69400,
+  eth: 2180, ethChange: -2.1, oi: "43.95B", vol: "72.77B",
+  funding: "-0.005%", ls: "0.89", liqLong: "$180M", liqShort: "$42M",
+  fg: 27, dom: "62.4%", s1: 64320, s2: 60000, r1: 68086,
+};
+
+const SYSTEM = `Você é o HTO Crypto Futures Agent para Hudson Torres. Dados do mercado (01/03/2026): BTC $64.052 (-3.97%), RSI 38.10 (sobrevenda), Supertrend BAIXISTA, EMA200 $69.400, ETH $2.180 (-2.1%), OI $43.95B, Funding -0.005% (negativo), L/S 0.89 (shorts dominam), Liq 24h $180M longs/$42M shorts, Fear&Greed 27 (Medo Extremo), Dom 62.4%, Suportes: S1 $64.320 S2 $60.000, Resistências: R1 $68.086. Exchanges: Bybit Binance OKX. Responda em português, direto e técnico, máximo 180 palavras, use emojis.`;
+
+const SUGS = ["Analisar BTC agora 📊","Setup long ETH?","Funding negativo significa?","Long ou short agora?","RSI 38 — o que fazer?"];
+
+const TEMPLATES = {
+  "RSI + EMA 200": `study("HTO RSI+EMA",overlay=true)\nema200=ema(close,200)\nrsiVal=rsi(close,14)\nlongSig=rsiVal<35 and close>ema200\nshortSig=rsiVal>65 and close<ema200\nplot(ema200,"EMA200",color.yellow,2)\nplotshape(longSig,"LONG",shape.triangleup,location.belowbar,color.green)\nplotshape(shortSig,"SHORT",shape.triangledown,location.abovebar,color.red)`,
+  "Supertrend + Volume": `study("HTO Supertrend",overlay=true)\n[st,dir]=supertrend(3.0,10)\nvolMA=sma(volume,20)\nhighVol=volume>volMA*1.5\nplot(st,color=dir==1?color.green:color.red,linewidth=2)\nbgcolor(dir==1 and highVol?color.new(color.green,90):dir==-1 and highVol?color.new(color.red,90):na)`,
+  "Scalp — Liq. Zones": `// Zonas de liquidação atuais BTC:\n// SHORT: entrada $64.000, alvo $61.000, stop $65.500 → RR 2:1\n// LONG (aguardar): entrada $64.500 rompimento, alvo $68.086, stop $63.200\n// Longs em risco abaixo de $63.500 → cascata possível\n// Short squeeze potencial acima de $67.500`,
+};
+
+const C = { gold:"#F7A600", navy:"#0D1B3E", navy2:"#16213E", blue:"#4FC3F7", green:"#00C48C", red:"#FF4757", muted:"#7A8BA8", white:"#F0F0F0", border:"rgba(247,166,0,0.22)" };
+
+export default function App() {
+  const [tab, setTab] = useState("dash");
+  const [msgs, setMsgs] = useState([{ r:"a", t:"Olá **Hudson**! 🔥 Sou o **HTO Crypto Futures Agent**.\n\n📊 BTC $64.052 (-3.97%) | RSI 38.10 (sobrevenda) | Fear&Greed: 27 😰\n\nEscolha uma sugestão abaixo ou digite sua pergunta!" }]);
+  const [inp, setInp] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [pine, setPine] = useState("");
+  const [pRes, setPRes] = useState("");
+  const [pBusy, setPBusy] = useState(false);
+  const chatRef = useRef(null);
+
+  useEffect(() => { if (chatRef.current) chatRef.current.scrollTop = 9999; }, [msgs, busy]);
+
+  const bold = (t) => t.split(/\*\*(.*?)\*\*/g).map((p,i) => i%2===1 ? <strong key={i} style={{color:C.gold}}>{p}</strong> : p);
+
+  const renderMsg = (t) => t.split("\n").map((l,i) => <div key={i} style={{minHeight:l?"auto":"8px"}}>{bold(l)}</div>);
+
+  async function ask(text) {
+    const m = (text||inp).trim(); if(!m||busy) return;
+    setInp("");
+    const next = [...msgs, {r:"u",t:m}];
+    setMsgs(next); setBusy(true);
+    const hist = next.map(x=>({role:x.r==="a"?"assistant":"user",content:x.t}));
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:SYSTEM,messages:hist})});
+      const d = await res.json();
+      setMsgs(p=>[...p,{r:"a",t:d.content?.map(c=>c.text||"").join("")||"Erro."}]);
+    } catch { setMsgs(p=>[...p,{r:"a",t:"❌ Erro de conexão."}]); }
+    setBusy(false);
+  }
+
+  async function analyzePine() {
+    if(!pine.trim()||pBusy) return;
+    setPBusy(true); setPRes("");
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:SYSTEM+"\nAnalise o Pine Script/estratégia: identifique lógica, pontos fortes, riscos e otimizações para futuros. Seja direto com emojis.",messages:[{role:"user",content:`Analise: ${pine}`}]})});
+      const d = await res.json();
+      setPRes(d.content?.map(c=>c.text||"").join("")||"Erro.");
+    } catch { setPRes("❌ Erro."); }
+    setPBusy(false);
+  }
+
+  const box = { background:"rgba(22,33,62,0.9)", border:`1px solid ${C.border}`, borderRadius:10, padding:14 };
+  const tabStyle = (id) => ({ flex:1, padding:"8px 2px", textAlign:"center", cursor:"pointer", borderRadius:6, fontSize:10, fontWeight:700, color:tab===id?C.navy:C.muted, background:tab===id?C.gold:"transparent", border:"none", fontFamily:"sans-serif", letterSpacing:0.5 });
+  const row = (l,v,vc) => <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid rgba(255,255,255,0.05)`,fontSize:11}}><span style={{color:C.muted}}>{l}</span><span style={{color:vc,fontWeight:700}}>{v}</span></div>;
+
+  return (
+    <div style={{background:`linear-gradient(135deg,${C.navy} 0%,${C.navy2} 100%)`,minHeight:"100vh",padding:14,fontFamily:"'JetBrains Mono',monospace",color:C.white}}>
+
+      {/* HEADER */}
+      <div style={{display:"flex",alignItems:"center",gap:12,borderBottom:`2px solid ${C.border}`,paddingBottom:12,marginBottom:14}}>
+        <div style={{width:46,height:46,borderRadius:"50%",background:"#1A1A40",border:`2px solid ${C.gold}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:`0 0 18px rgba(247,166,0,0.4)`}}>⬡</div>
+        <div>
+          <div style={{fontFamily:"sans-serif",fontSize:14,fontWeight:800,color:C.gold,letterSpacing:2}}>HTO CRYPTO FUTURES AGENT</div>
+          <div style={{color:C.muted,fontSize:9,marginTop:2,letterSpacing:1}}>HUDSON TORRES · BYBIT · BINANCE · OKX</div>
+        </div>
+        <div style={{marginLeft:"auto",background:"rgba(0,196,140,0.12)",border:`1px solid ${C.green}`,color:C.green,padding:"4px 10px",borderRadius:20,fontSize:9,fontWeight:700}}>● ATIVO</div>
+      </div>
+
+      {/* TABS */}
+      <div style={{display:"flex",gap:3,background:"rgba(0,0,0,0.3)",padding:3,borderRadius:8,marginBottom:14,border:`1px solid ${C.border}`}}>
+        {[["dash","📊 Dashboard"],["news","🌐 News"],["tech","📈 Análise"],["chat","🤖 Agente IA"],["pine","🌲 Pine"]].map(([id,label])=>(
+          <button key={id} style={tabStyle(id)} onClick={()=>setTab(id)}>{label}</button>
+        ))}
+      </div>
+
+      {/* DASHBOARD */}
+      {tab==="dash" && <>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:12}}>
+          {[["BTC/USDT","$64.052","▼ -3.97%",C.red],["ETH/USDT","$2.180","▼ -2.1%",C.red],["BTC DOM.","62.4%","↗ Em alta",C.gold],["F&G INDEX","27 😰","MEDO EXTREMO",C.red]].map(([l,v,s,c],i)=>(
+            <div key={i} style={box}>
+              <div style={{color:C.muted,fontSize:9,letterSpacing:2,marginBottom:4}}>{l}</div>
+              <div style={{fontFamily:"sans-serif",fontSize:17,fontWeight:800,color:c}}>{v}</div>
+              <div style={{color:c,fontSize:9,marginTop:2}}>{s}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+          <div style={box}>
+            <div style={{fontFamily:"sans-serif",fontSize:10,fontWeight:700,color:C.gold,letterSpacing:2,marginBottom:10,paddingBottom:6,borderBottom:`1px solid ${C.border}`}}>⚡ FUTUROS</div>
+            {[["Open Interest","$43.95B ▼",C.red],["Funding Rate","-0.005% 🟡",C.blue],["Long/Short","0.89 shorts dom.",C.red],["Liq. Longs 24h","$180M",C.red],["Volume 24h","$72.77B",C.white]].map(([l,v,c],i)=>row(l,v,c))}
+          </div>
+          <div style={box}>
+            <div style={{fontFamily:"sans-serif",fontSize:10,fontWeight:700,color:C.gold,letterSpacing:2,marginBottom:10,paddingBottom:6,borderBottom:`1px solid ${C.border}`}}>👁️ WATCHLIST</div>
+            {[["BTC","Bounce potencial","$64.320",C.green],["ETH","Short bias","$2.100",C.red],["SOL","Watching break","$130",C.gold],["XRP","Range bound","$2.40",C.red]].map(([a,s,n,c],i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.05)",fontSize:11}}>
+                <span style={{color:C.gold,fontWeight:700,width:30}}>{a}</span>
+                <span style={{color:C.muted,flex:1,paddingLeft:8}}>{s}</span>
+                <span style={{color:c,fontWeight:700}}>{n}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div style={{...box,background:"rgba(0,196,140,0.07)",border:`1px solid rgba(0,196,140,0.25)`}}>
+            <div style={{fontFamily:"sans-serif",fontWeight:800,color:C.green,marginBottom:6,fontSize:12}}>🟢 CENÁRIO BULL</div>
+            <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>RSI 38.10 em sobrevenda + ETF outflows desacelerando ($206M fev vs $1.6B jan). Possível bounce $68K–$72K se BTC segurar $64.320.</div>
+          </div>
+          <div style={{...box,background:"rgba(255,71,87,0.07)",border:`1px solid rgba(255,71,87,0.25)`}}>
+            <div style={{fontFamily:"sans-serif",fontWeight:800,color:C.red,marginBottom:6,fontSize:12}}>🔴 CENÁRIO BEAR</div>
+            <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>Perda de $64.320 acelera queda para $60K e $58.2K. Funding negativo + shorts dominantes reforçam viés vendedor.</div>
+          </div>
+        </div>
+      </>}
+
+      {/* NEWS */}
+      {tab==="news" && <>
+        <div style={{fontFamily:"sans-serif",fontSize:10,fontWeight:700,color:C.gold,letterSpacing:2,marginBottom:12}}>🌐 TOP NOTÍCIAS — 01 MAR 2026</div>
+        {[
+          [C.blue,"rgba(79,195,247,0.15)","INSTITUCIONAL","CME Group lança futuros crypto 24/7 a partir de 29 de maio de 2026","Trading regulamentado de BTC e ETH futuros 24h/7d após aprovação regulatória. Atrai hedge funds e pensões, aumentando liquidez no mercado de derivativos cripto."],
+          [C.red,"rgba(255,71,87,0.15)","MACRO","Bitcoin — 5º mês consecutivo de quedas","BTC acumula 30%+ de queda ano a ano. ETF outflows desacelerando: $206M em fev vs $1.6B em jan — forte sinal de reversão. RSI em sobrevenda histórica."],
+          [C.gold,"rgba(247,166,0,0.15)","MERCADO","Treasury Crypto em consolidação — Mt. Gox pressiona","Pagamentos Mt. Gox pressionando mercado. Empresas com receita operacional (validators, RWA, crédito tokenizado) surgem mais resilientes."],
+          [C.green,"rgba(0,196,140,0.15)","BULL SIGNAL","Citi e Morgan Stanley expandem custody crypto","Grandes bancos ampliam serviços crypto. Grayscale: sem crypto winter no horizonte, prevê novo ATH no 1º semestre 2026."],
+        ].map(([bc,bg,badge,title,body],i)=>(
+          <div key={i} style={{background:"rgba(22,33,62,0.85)",border:`1px solid ${C.border}`,borderLeft:`4px solid ${bc}`,borderRadius:"0 10px 10px 0",padding:"12px 14px",marginBottom:10}}>
+            <span style={{display:"inline-block",fontSize:9,fontWeight:700,letterSpacing:1.5,padding:"2px 7px",borderRadius:3,marginBottom:6,background:bg,color:bc}}>{badge}</span>
+            <div style={{fontFamily:"sans-serif",fontSize:13,fontWeight:700,color:C.white,marginBottom:4,lineHeight:1.4}}>{title}</div>
+            <div style={{color:C.muted,fontSize:11,lineHeight:1.6}}>{body}</div>
+          </div>
+        ))}
+      </>}
+
+      {/* ANÁLISE */}
+      {tab==="tech" && <>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div style={box}>
+            <div style={{fontFamily:"sans-serif",fontSize:10,fontWeight:700,color:C.gold,letterSpacing:2,marginBottom:10,paddingBottom:6,borderBottom:`1px solid ${C.border}`}}>📈 SUPORTES BTC</div>
+            {[["S1 — Forte (75%)","$64.320",C.green],["S2 — Psicológico","$60.000",C.green],["S3 — Fundo Estrutural","$58.200",C.green],["S4 — Macro","$52.000",C.green]].map(([l,v,c],i)=>row(l,v,c))}
+          </div>
+          <div style={box}>
+            <div style={{fontFamily:"sans-serif",fontSize:10,fontWeight:700,color:C.gold,letterSpacing:2,marginBottom:10,paddingBottom:6,borderBottom:`1px solid ${C.border}`}}>📉 RESISTÊNCIAS BTC</div>
+            {[["R1 — Score 84%","$68.086",C.red],["EMA 200 Diária","$69.400",C.red],["R2 — Topo Recente","$72.000",C.red],["R3 — Macro","$75.000",C.red]].map(([l,v,c],i)=>row(l,v,c))}
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+          {[["RSI (14)","38.10","Sobrevenda",C.red],["SUPERTREND","BAIXISTA","Bearish",C.red],["EMA 200","$69.400","Preço abaixo",C.red]].map(([l,v,s,c],i)=>(
+            <div key={i} style={box}>
+              <div style={{color:C.muted,fontSize:9,letterSpacing:2,marginBottom:4}}>{l}</div>
+              <div style={{fontFamily:"sans-serif",fontSize:16,fontWeight:800,color:c}}>{v}</div>
+              <div style={{color:c,fontSize:9,marginTop:2}}>{s}</div>
+            </div>
+          ))}
+        </div>
+        <div style={box}>
+          <div style={{fontFamily:"sans-serif",fontSize:10,fontWeight:700,color:C.gold,letterSpacing:2,marginBottom:10,paddingBottom:6,borderBottom:`1px solid ${C.border}`}}>⚡ ZONAS DE LIQUIDAÇÃO</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              {[["Cascata Longs abaixo de","$63.500",C.red],["Longs liquidados 24h","$180M",C.red],["Zona liq. longs","$60K–$62K",C.red]].map(([l,v,c],i)=>row(l,v,c))}
+            </div>
+            <div>
+              {[["Short Squeeze potencial","$68K–$70K",C.green],["Shorts liquidados 24h","$42M",C.green],["L/S Ratio","0.89 shorts dom.",C.red]].map(([l,v,c],i)=>row(l,v,c))}
+            </div>
+          </div>
+        </div>
+      </>}
+
+      {/* AGENTE IA */}
+      {tab==="chat" && <>
+        <div style={{...box,display:"flex",flexDirection:"column",height:440}}>
+          <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`,fontFamily:"sans-serif",fontSize:10,fontWeight:700,color:C.gold,letterSpacing:1}}>🤖 HTO AGENT — ESPECIALISTA EM CRYPTO FUTURES</div>
+          <div ref={chatRef} style={{flex:1,overflowY:"auto",padding:12,display:"flex",flexDirection:"column",gap:10}}>
+            {msgs.map((m,i)=>(
+              <div key={i} style={{alignSelf:m.r==="a"?"flex-start":"flex-end",maxWidth:"88%",background:m.r==="a"?"rgba(13,27,62,0.95)":"rgba(247,166,0,0.15)",border:`1px solid ${m.r==="a"?C.border:"rgba(247,166,0,0.3)"}`,borderRadius:m.r==="a"?"4px 10px 10px 10px":"10px 4px 10px 10px",padding:"10px 12px",fontSize:12,lineHeight:1.6}}>
+                {m.r==="a" && <div style={{color:C.gold,fontWeight:700,fontSize:9,marginBottom:4}}>HTO AGENT 🤖</div>}
+                {renderMsg(m.t)}
+              </div>
+            ))}
+            {busy && <div style={{alignSelf:"flex-start",background:"rgba(13,27,62,0.95)",border:`1px solid ${C.border}`,borderRadius:"4px 10px 10px 10px",padding:"10px 12px",fontSize:11,color:C.muted}}>
+              <div style={{color:C.gold,fontWeight:700,fontSize:9,marginBottom:4}}>HTO AGENT 🤖</div>
+              ⏳ Analisando mercado...
+            </div>}
+          </div>
+          <div style={{padding:"8px 10px",display:"flex",flexWrap:"wrap",gap:5,borderTop:`1px solid rgba(247,166,0,0.1)`}}>
+            {SUGS.map((s,i)=><button key={i} onClick={()=>ask(s)} style={{background:"rgba(79,195,247,0.08)",border:"1px solid rgba(79,195,247,0.22)",color:C.blue,padding:"3px 9px",borderRadius:20,fontSize:9,cursor:"pointer",fontFamily:"monospace"}}>{s}</button>)}
+          </div>
+          <div style={{padding:"10px",borderTop:`1px solid ${C.border}`,display:"flex",gap:8}}>
+            <input value={inp} onChange={e=>setInp(e.target.value)} onKeyDown={e=>e.key==="Enter"&&ask()} placeholder="Digite sua pergunta aqui..." disabled={busy} style={{flex:1,background:"rgba(0,0,0,0.4)",border:`1px solid ${C.border}`,color:C.white,padding:"9px 12px",borderRadius:7,fontFamily:"monospace",fontSize:12,outline:"none"}} />
+            <button onClick={()=>ask()} disabled={busy} style={{background:C.gold,color:C.navy,border:"none",padding:"9px 14px",borderRadius:7,cursor:"pointer",fontWeight:800,fontSize:14}}>➤</button>
+          </div>
+        </div>
+      </>}
+
+      {/* PINE SCRIPT */}
+      {tab==="pine" && <>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div style={box}>
+            <div style={{fontFamily:"sans-serif",fontSize:10,fontWeight:700,color:C.gold,letterSpacing:2,marginBottom:8,paddingBottom:6,borderBottom:`1px solid ${C.border}`}}>🌲 ANALISADOR PINE SCRIPT</div>
+            <p style={{color:C.muted,fontSize:11,marginBottom:10,lineHeight:1.5}}>Cole seu Pine Script ou descreva sua estratégia:</p>
+            <textarea value={pine} onChange={e=>setPine(e.target.value)} placeholder={"// Cole seu Pine Script aqui\n// ou descreva seu setup:\n// 'Uso RSI 14 + EMA 200 para entradas\n// long em BTC futures na Bybit'"} style={{width:"100%",background:"rgba(0,0,0,0.4)",border:`1px solid ${C.border}`,color:"#A9DC76",padding:12,borderRadius:7,fontFamily:"monospace",fontSize:11,resize:"vertical",minHeight:150,lineHeight:1.6,outline:"none"}} />
+            <button onClick={analyzePine} disabled={pBusy} style={{background:"linear-gradient(135deg,#F7A600,#FF8C00)",color:C.navy,border:"none",padding:"10px 22px",borderRadius:7,cursor:"pointer",fontWeight:800,fontSize:12,fontFamily:"sans-serif",marginTop:10,letterSpacing:1}}>
+              {pBusy?"⏳ ANALISANDO...":"⚡ ANALISAR COM IA"}
+            </button>
+            <div style={{background:"rgba(0,0,0,0.4)",border:`1px solid ${C.border}`,borderLeft:`4px solid ${C.gold}`,borderRadius:"0 8px 8px 0",padding:12,marginTop:12,fontSize:11,lineHeight:1.8,minHeight:80}}>
+              {pRes ? renderMsg(pRes) : <span style={{color:C.muted}}>Resultado da análise aparece aqui...</span>}
+            </div>
+          </div>
+          <div style={box}>
+            <div style={{fontFamily:"sans-serif",fontSize:10,fontWeight:700,color:C.gold,letterSpacing:2,marginBottom:8,paddingBottom:6,borderBottom:`1px solid ${C.border}`}}>💡 TEMPLATES PRONTOS</div>
+            <p style={{color:C.muted,fontSize:11,marginBottom:10}}>Clique para carregar e analisar:</p>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {Object.entries(TEMPLATES).map(([name,code])=>(
+                <button key={name} onClick={()=>setPine(code)} style={{background:"rgba(79,195,247,0.07)",border:"1px solid rgba(79,195,247,0.2)",color:C.blue,padding:"10px 12px",borderRadius:7,cursor:"pointer",textAlign:"left",fontFamily:"monospace",fontSize:11}}>
+                  📋 {name}
+                </button>
+              ))}
+            </div>
+            <div style={{marginTop:14,padding:12,background:"rgba(0,0,0,0.3)",borderRadius:8,border:`1px solid ${C.border}`}}>
+              <div style={{fontFamily:"sans-serif",fontSize:9,color:C.gold,letterSpacing:2,marginBottom:6}}>💬 CONTEXTO DO MERCADO AGORA</div>
+              <div style={{color:C.muted,fontSize:11,lineHeight:1.6}}>RSI em 38.10 = sobrevenda técnica. Funding Rate negativo indica pressão vendedora mas atenção a possível short squeeze acima de $67.5K. Suporte crítico: $64.320.</div>
+            </div>
+          </div>
+        </div>
+      </>}
+
+    </div>
+  );
+}
